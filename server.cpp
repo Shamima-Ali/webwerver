@@ -6,19 +6,69 @@
 #include <stdint.h>
 #include <arpa/inet.h>
 #include <signal.h>
+#include <fstream>
+#include <cstdlib>
 
 using namespace std;
 
+void process_clientBuffer(char clientBuffer[1024], int clientSocket) {
+    if (clientBuffer[5] == ' ') {
+        cout << "GET request" << endl;
+       
+        char *path="./www/index.html";
+        ifstream indexFile;
+        indexFile.open (path);
 
+        if (indexFile.is_open()) {
+            indexFile.seekg (0, indexFile.end);
+            int length = indexFile.tellg();
+            indexFile.seekg (0, indexFile.beg);
+            cout << length << endl;
+
+            const char* httpResponse = "HTTP/1.1 200 OK\r\n\r\n";
+            
+            char * buffer = new char [length+1024];
+            memcpy(buffer, httpResponse, strlen(httpResponse));
+            indexFile.read (buffer + strlen(httpResponse), length);
+
+            if (indexFile) {
+                cout << "All characters read successfully.";
+            } else {
+                cout << "Error: only " << indexFile.gcount() << " could be read";
+            }
+            indexFile.close();
+
+            send(clientSocket, buffer, strlen(buffer), 0);
+            delete[] buffer;
+
+        } else {
+            cout << "Error opening file." << endl;
+        }
+        
+
+    } else {
+        char *buffer = "HTTP/1.1 400 OK\r\n\r\nNot Found";
+        send(clientSocket, buffer, strlen(buffer), 0);
+    }
+}
+
+int createSocket() {
+    int serverSocketFd = socket(AF_INET, SOCK_STREAM, 0);
+    return serverSocketFd;
+}
+
+int defineBindServerAddr(int serverSocketFd) {
+
+    return 0;
+
+}
 
 int main() {
-    int serverSocketFd = socket(AF_INET, SOCK_STREAM, 0);
+    int serverSocketFd = createSocket();
     if (serverSocketFd == -1) {
         cout << "Error creating socket. "  << strerror(errno) << endl;
-        return 1;
     }
 
-    int sockfd;  
     struct addrinfo hints, *servinfo, *p;
     int rv;
 
@@ -34,8 +84,7 @@ int main() {
 
     // loop through all the results and bind to the first we can
     for(p = servinfo; p != NULL; p = p->ai_next) {
-        if ((serverSocketFd = socket(p->ai_family, p->ai_socktype,
-                p->ai_protocol)) == -1) {
+        if ((serverSocketFd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             perror("socket");
             continue;
         }
@@ -43,7 +92,7 @@ int main() {
         if (bind(serverSocketFd, p->ai_addr, p->ai_addrlen) == -1) {
             cout << "Error binding to socket. " << strerror(errno) << endl;
             close(serverSocketFd);
-            continue;;
+            continue;
         }
 
         break; // if we get here, we must have connected successfully
@@ -71,18 +120,32 @@ int main() {
             return 1;
         }
 
-        char clientBuffer[1024] = {0};
-        ssize_t bytesReceived = recv(clientSocket, clientBuffer, sizeof(clientBuffer), 0);
-        if (bytesReceived == -1) {
-            cout << "Error receiving message from client. " << strerror(errno) << endl;
+        pid_t c_pid = fork();
+        cout << c_pid << endl;
+
+        if (c_pid == -1) {
+            cout << "Error creating child" << endl;
             return 1;
+        } else if (c_pid == 0) {
+            cout << "I am child " << getpid() << endl;
+
+            char clientBuffer[1024] = {0};
+            ssize_t bytesReceived = recv(clientSocket, clientBuffer, sizeof(clientBuffer), 0);
+            if (bytesReceived == -1) {
+                cout << "Error receiving message from client. " << strerror(errno) << endl;
+                return 1;
+            }
+
+            process_clientBuffer(clientBuffer, clientSocket);
+
+            cout << "Closing client socket now. " << endl;
+            close(clientSocket);
+
+        } else {
+
+            close(clientSocket); 
         }
-        cout << "Message from client: " << clientBuffer << endl;
-
-        char ackBuff[1024] = "HTTP/1.1 200 OK\r\n\r\nMessage received";
-        send(clientSocket, &ackBuff, strlen(ackBuff), 0);
-        close(clientSocket);
-
+    
     }
 
     close(serverSocketFd);
