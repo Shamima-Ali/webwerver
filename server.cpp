@@ -19,7 +19,8 @@ using namespace std;
 void process_clientBuffer(char clientBuffer[1024], int clientSocket) {
     if (clientBuffer[5] == ' ') {
         cout << "GET request" << endl;
-       
+        
+
         const char *path= "./www/index.html";
         ifstream indexFile;
         indexFile.open (path);
@@ -28,7 +29,6 @@ void process_clientBuffer(char clientBuffer[1024], int clientSocket) {
             indexFile.seekg (0, indexFile.end);
             int length = indexFile.tellg();
             indexFile.seekg (0, indexFile.beg);
-            cout << length << endl;
 
             const char* httpResponse = "HTTP/1.1 200 OK\r\n\r\n";
             
@@ -36,13 +36,29 @@ void process_clientBuffer(char clientBuffer[1024], int clientSocket) {
             memcpy(buffer, httpResponse, strlen(httpResponse));
             indexFile.read (buffer + strlen(httpResponse), length);
 
-            if (indexFile) {
-                cout << "All characters read successfully.";
-            } else {
-                cout << "Error: only " << indexFile.gcount() << " could be read";
+            if (!indexFile) {
+                cout << "Error: index.html " << indexFile.gcount() << " could be read";
             }
             indexFile.close();
+            
+            thread::id child_thread_id = this_thread::get_id();
+            
+            cout << "Child Thread ID: " << child_thread_id << endl;
 
+            // // Convert thread ID to string
+            // std::stringstream ss;
+            // ss << child_thread_id;
+            // std::string id_str = ss.str();
+
+            // // Allocate a char* buffer and copy the string
+            // char* c_id = new char[1024];
+            // std::strncpy(c_id, id_str.c_str(), 1023); // Use strncpy for safety
+            // c_id[1023] = '\0'; // Null-terminate the string
+
+            // // Cleanup dynamically allocated memory
+            // delete[] c_id;
+    
+            this_thread::sleep_for (std::chrono::seconds(20));
             send(clientSocket, buffer, strlen(buffer), 0);
             delete[] buffer;
 
@@ -55,6 +71,9 @@ void process_clientBuffer(char clientBuffer[1024], int clientSocket) {
         const char *buffer = "HTTP/1.1 400 OK\r\n\r\nNot Found";
         send(clientSocket, buffer, strlen(buffer), 0);
     }
+
+    cout << "Closing client socket now. " << endl;
+    close(clientSocket);
 }
 
 void createChildProcess(int clientSocket) {
@@ -142,12 +161,14 @@ int main() {
     cout << "Server is running on 127.0.0.1:8080" << endl;
 
     while (true) {
+        cout << "Waiting for connection..." << endl;
         int clientSocket = accept(serverSocketFd, nullptr, nullptr);
         if (clientSocket == -1) {
             cout << "Error accepting connection." << strerror(errno) << endl;
             return 1;
         }
 
+        cout << "Accepted connection..." << endl;
         char clientBuffer[1024] = {0};
         ssize_t bytesReceived = recv(clientSocket, clientBuffer, sizeof(clientBuffer), 0);
         if (bytesReceived == -1) {
@@ -155,15 +176,12 @@ int main() {
             return 1;
         }
 
+        cout << "Creating thread..." << endl;
         thread clientThread(process_clientBuffer, clientBuffer, clientSocket);
-        cout << "client thread ID: " <<  clientThread.get_id() << endl;
+        clientThread.detach();
 
-        cout << "Waiting for thread client. " << endl;
-        clientThread.join();
-        cout << "Closing client socket now. " << endl;
-        close(clientSocket);
-        
-
+        // cout << "Client thread sent res. Waiting for thread client to complete" << clientThread.get_id() << endl;
+        // clientThread.join();
         // createChildProcess(clientSocket); // Alternative to threading        
     
     }
