@@ -8,14 +8,19 @@
 #include <signal.h>
 #include <fstream>
 #include <cstdlib>
+#include <thread> 
+
+#include <sys/types.h>
+
 
 using namespace std;
+
 
 void process_clientBuffer(char clientBuffer[1024], int clientSocket) {
     if (clientBuffer[5] == ' ') {
         cout << "GET request" << endl;
        
-        char *path="./www/index.html";
+        const char *path= "./www/index.html";
         ifstream indexFile;
         indexFile.open (path);
 
@@ -47,21 +52,44 @@ void process_clientBuffer(char clientBuffer[1024], int clientSocket) {
         
 
     } else {
-        char *buffer = "HTTP/1.1 400 OK\r\n\r\nNot Found";
+        const char *buffer = "HTTP/1.1 400 OK\r\n\r\nNot Found";
         send(clientSocket, buffer, strlen(buffer), 0);
     }
 }
 
+void createChildProcess(int clientSocket) {
+    pid_t c_pid = fork();
+    cout << c_pid << endl;
+
+    if (c_pid == -1) {
+        cout << "Error creating child" << endl;
+        return;
+    } else if (c_pid == 0) {
+        cout << "I am child " << getpid() << endl;
+
+        char clientBuffer[1024] = {0};
+        ssize_t bytesReceived = recv(clientSocket, clientBuffer, sizeof(clientBuffer), 0);
+        if (bytesReceived == -1) {
+            cout << "Error receiving message from client. " << strerror(errno) << endl;
+            return;
+        }
+
+        process_clientBuffer(clientBuffer, clientSocket);
+
+        cout << "Closing client socket now. " << endl;
+        close(clientSocket);
+
+    } else {
+        close(clientSocket); 
+    }
+
+    return;
+}
 int createSocket() {
     int serverSocketFd = socket(AF_INET, SOCK_STREAM, 0);
     return serverSocketFd;
 }
 
-int defineBindServerAddr(int serverSocketFd) {
-
-    return 0;
-
-}
 
 int main() {
     int serverSocketFd = createSocket();
@@ -89,7 +117,7 @@ int main() {
             continue;
         }
 
-        if (bind(serverSocketFd, p->ai_addr, p->ai_addrlen) == -1) {
+        if (::bind(serverSocketFd, p->ai_addr, p->ai_addrlen) == -1) {
             cout << "Error binding to socket. " << strerror(errno) << endl;
             close(serverSocketFd);
             continue;
@@ -120,31 +148,23 @@ int main() {
             return 1;
         }
 
-        pid_t c_pid = fork();
-        cout << c_pid << endl;
-
-        if (c_pid == -1) {
-            cout << "Error creating child" << endl;
+        char clientBuffer[1024] = {0};
+        ssize_t bytesReceived = recv(clientSocket, clientBuffer, sizeof(clientBuffer), 0);
+        if (bytesReceived == -1) {
+            cout << "Error receiving message from client. " << strerror(errno) << endl;
             return 1;
-        } else if (c_pid == 0) {
-            cout << "I am child " << getpid() << endl;
-
-            char clientBuffer[1024] = {0};
-            ssize_t bytesReceived = recv(clientSocket, clientBuffer, sizeof(clientBuffer), 0);
-            if (bytesReceived == -1) {
-                cout << "Error receiving message from client. " << strerror(errno) << endl;
-                return 1;
-            }
-
-            process_clientBuffer(clientBuffer, clientSocket);
-
-            cout << "Closing client socket now. " << endl;
-            close(clientSocket);
-
-        } else {
-
-            close(clientSocket); 
         }
+
+        thread clientThread(process_clientBuffer, clientBuffer, clientSocket);
+        cout << "client thread ID: " <<  clientThread.get_id() << endl;
+
+        cout << "Waiting for thread client. " << endl;
+        clientThread.join();
+        cout << "Closing client socket now. " << endl;
+        close(clientSocket);
+        
+
+        // createChildProcess(clientSocket); // Alternative to threading        
     
     }
 
