@@ -12,68 +12,159 @@
 
 #include <sys/types.h>
 
-
 using namespace std;
 
+void closeClientSocket(int clientSocket) {
+    cout << "Closing client socket " << clientSocket << " now. " << endl;
+    close(clientSocket);
+}
 
-void process_clientBuffer(char clientBuffer[1024], int clientSocket) {
-    if (clientBuffer[5] == ' ') {
-        cout << "GET request" << endl;
+void openIndexFile(int clientSocket) {
+    cout << "GET index file request" << endl;
+    const char *path= "./www/index.html";
+    ifstream indexFile;
+    indexFile.open (path);
+
+    if (indexFile.is_open()) {
+        indexFile.seekg (0, indexFile.end);
+        int length = indexFile.tellg();
+        indexFile.seekg (0, indexFile.beg);
+
+        const char* httpResponse = "HTTP/1.1 200 OK\r\n\r\n";
         
+        char * buffer = new char [length+1024];
+        memcpy(buffer, httpResponse, strlen(httpResponse));
+        indexFile.read (buffer + strlen(httpResponse), length);
 
-        const char *path= "./www/index.html";
-        ifstream indexFile;
-        indexFile.open (path);
-
-        if (indexFile.is_open()) {
-            indexFile.seekg (0, indexFile.end);
-            int length = indexFile.tellg();
-            indexFile.seekg (0, indexFile.beg);
-
-            const char* httpResponse = "HTTP/1.1 200 OK\r\n\r\n";
-            
-            char * buffer = new char [length+1024];
-            memcpy(buffer, httpResponse, strlen(httpResponse));
-            indexFile.read (buffer + strlen(httpResponse), length);
-
-            if (!indexFile) {
-                cout << "Error: index.html " << indexFile.gcount() << " could be read";
-            }
-            indexFile.close();
-            
-            thread::id child_thread_id = this_thread::get_id();
-            
-            cout << "Child Thread ID: " << child_thread_id << endl;
-
-            // // Convert thread ID to string
-            // std::stringstream ss;
-            // ss << child_thread_id;
-            // std::string id_str = ss.str();
-
-            // // Allocate a char* buffer and copy the string
-            // char* c_id = new char[1024];
-            // std::strncpy(c_id, id_str.c_str(), 1023); // Use strncpy for safety
-            // c_id[1023] = '\0'; // Null-terminate the string
-
-            // // Cleanup dynamically allocated memory
-            // delete[] c_id;
-    
-            this_thread::sleep_for (std::chrono::seconds(20));
-            send(clientSocket, buffer, strlen(buffer), 0);
-            delete[] buffer;
-
-        } else {
-            cout << "Error opening file." << endl;
+        if (!indexFile) {
+            cout << "Error: index.html " << indexFile.gcount() << " could be read";
         }
-        
+        indexFile.close();
 
-    } else {
-        const char *buffer = "HTTP/1.1 400 OK\r\n\r\nNot Found";
+        // this_thread::sleep_for (std::chrono::seconds(20));
         send(clientSocket, buffer, strlen(buffer), 0);
+        delete[] buffer;
+
+        closeClientSocket(clientSocket);
+
+    }  else {
+        cout << "Error opening index file." << endl;
+        closeClientSocket(clientSocket);
+    }
+}
+
+void ignoreFavIcon(int clientSocket) {
+    cout << "Ignoring favicon.ico request." << endl;
+    closeClientSocket(clientSocket);
+}
+
+void displayNotFound(int clientSocket) {
+    const char *buffer = "HTTP/1.1 400 OK\r\n\r\nNot Found";
+    send(clientSocket, buffer, strlen(buffer), 0);
+    closeClientSocket(clientSocket);
+}
+
+void process_clientBuffer(string clientBuffer, int clientSocket) {
+    stringstream ss(clientBuffer);
+    string word = "";
+    string req = "";
+    string fileToExec = "hello.alicgi";
+    int len = fileToExec.length();
+
+    if (clientBuffer.empty()) {
+        cout << "Empty buffer" << endl;
+        closeClientSocket(clientSocket);
+        return;
     }
 
-    cout << "Closing client socket now. " << endl;
-    close(clientSocket);
+    while (ss >> word) {
+        if (word == "Host:") {
+            break;
+        }
+        req += word + " ";
+    }
+
+    string reqPath = req.substr(5, req.length() - 6);
+    cout << "reqPath --------> " << reqPath << endl;
+ 
+    if (clientBuffer[5] == ' ') {
+        openIndexFile(clientSocket);
+        return;
+        
+    } else if (reqPath.substr(0, 12) == fileToExec) {
+        string queryWithVersion = reqPath.substr(13, reqPath.length() - len);
+        string versionHttp = "HTTP/1.1";
+        int versionLen = versionHttp.length();
+        int endOfQuery = queryWithVersion.length() - versionLen;
+
+        string query = queryWithVersion.substr(0, endOfQuery);
+        
+        cout << "executing hello" << endl;
+        const char *envVarName = "QUERY_STRING";
+        const char *envFileDesc = "FILE_DESCRIPTOR";
+
+
+        int pipefd[2];
+        if (pipe(pipefd) == -1) {
+            perror("pipe");
+            exit(EXIT_FAILURE);
+        }
+
+        pid_t pid = fork();// create child
+        if (pid == -1) {
+            cout << "Error creating child" << endl;
+            closeClientSocket(clientSocket);
+            return;
+        } else if (pid == 0) {
+            cout << "Child process created" << endl;
+            char cgiBuff;
+            dup2(pipefd[1], STDOUT_FILENO);
+            setenv(envVarName, query.c_str(), 1); // set its env
+            
+            const char *path= "./cgi-bin/hello.alicgi"; // get path of executable
+            const char* args[] = {path, nullptr};
+            execvp(path, const_cast<char* const*>(args)); // execute
+            while (read(pipefd[0], &cgiBuff, 1024) > 0) {
+                write(clientSocket, &cgiBuff, 1024);
+            }
+            write(clientSocket, "\n", 1);
+            
+            closeClientSocket(clientSocket);
+        } else {
+            close(pipefd[1]);
+            int status;
+
+            const char* httpHeaders = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+            send(clientSocket, httpHeaders, strlen(httpHeaders), 0);
+
+            char buffer[1024];
+            ssize_t bytesRead;
+            while ((bytesRead = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
+                send(clientSocket, buffer, bytesRead, 0);
+            }
+
+            close(pipefd[0]);
+
+            waitpid(pid, &status, 0);
+
+            if (WIFEXITED(status)) {
+                std::cout << "Child process exited with status: " << WEXITSTATUS(status) << "\n";
+            } else {
+                std::cerr << "Child process did not exit normally.\n" << WEXITSTATUS(status) << "\n";
+            }
+            closeClientSocket(clientSocket);
+        }
+        // closeClientSocket(clientSocket);
+    } else if (reqPath == "favicon.ico HTTP/1.1") {
+        ignoreFavIcon(clientSocket);
+        return;
+    }
+    else {
+        displayNotFound(clientSocket);
+        return;
+    }
+
+   return;
 }
 
 void createChildProcess(int clientSocket) {
@@ -168,15 +259,18 @@ int main() {
             return 1;
         }
 
-        cout << "Accepted connection..." << endl;
-        char clientBuffer[1024] = {0};
-        ssize_t bytesReceived = recv(clientSocket, clientBuffer, sizeof(clientBuffer), 0);
+        cout << "Accepted connection with client socket..." << clientSocket << endl;
+        char tempBuffer[1024] = {0};
+        ssize_t bytesReceived = recv(clientSocket, tempBuffer, sizeof(tempBuffer), 0);
         if (bytesReceived == -1) {
             cout << "Error receiving message from client. " << strerror(errno) << endl;
             return 1;
         }
 
-        cout << "Creating thread..." << endl;
+        // Create a string copy of the buffer for the thread
+        string clientBuffer(tempBuffer, bytesReceived);
+
+        cout << "Creating thread with clientSocket value..." << clientSocket << endl;
         thread clientThread(process_clientBuffer, clientBuffer, clientSocket);
         clientThread.detach();
 

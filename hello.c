@@ -4,8 +4,9 @@
 #include <string.h>
 
 int main(void) {
-  printf("Content-Type: text/plain;charset=us-ascii\n\n");
+  // printf("Content-Type: text/plain;charset=us-ascii\n\n");
   printf("Hello world\n\n");
+  printf("This is the response from the web werver.\n\n");
 
   char* data = getenv("QUERY_STRING");
   // printf("QUERY_STRING: %s\n", data);
@@ -28,8 +29,8 @@ int main(void) {
   int x = parsedArgs[0];
   int y = parsedArgs[1];
 
-  int res = x*y;
-  
+  int res = x*y; 
+
   printf("%d\n", res);
   return 0;
 }
