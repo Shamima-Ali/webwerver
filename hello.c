@@ -4,12 +4,10 @@
 #include <string.h>
 
 int main(void) {
-  // printf("Content-Type: text/plain;charset=us-ascii\n\n");
   printf("Hello world\n\n");
   printf("This is the response from the web werver.\n\n");
 
   char* data = getenv("QUERY_STRING");
-  // printf("QUERY_STRING: %s\n", data);
 
   char *parsedQ = strtok(data, ":");
   char * parsed = strtok(data, "&");

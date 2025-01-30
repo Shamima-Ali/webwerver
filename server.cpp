@@ -9,7 +9,6 @@
 #include <fstream>
 #include <cstdlib>
 #include <thread> 
-
 #include <sys/types.h>
 
 using namespace std;
@@ -154,7 +153,6 @@ void process_clientBuffer(string clientBuffer, int clientSocket) {
             }
             closeClientSocket(clientSocket);
         }
-        // closeClientSocket(clientSocket);
     } else if (reqPath == "favicon.ico HTTP/1.1") {
         ignoreFavIcon(clientSocket);
         return;
@@ -272,11 +270,7 @@ int main() {
 
         cout << "Creating thread with clientSocket value..." << clientSocket << endl;
         thread clientThread(process_clientBuffer, clientBuffer, clientSocket);
-        clientThread.detach();
-
-        // cout << "Client thread sent res. Waiting for thread client to complete" << clientThread.get_id() << endl;
-        // clientThread.join();
-        // createChildProcess(clientSocket); // Alternative to threading        
+        clientThread.detach();     
     
     }
 
