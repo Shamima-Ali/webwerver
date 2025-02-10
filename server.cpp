@@ -13,12 +13,7 @@
 
 using namespace std;
 
-void closeClientSocket(int clientSocket) {
-    cout << "Closing client socket " << clientSocket << " now. " << endl;
-    close(clientSocket);
-}
-
-void openIndexFile(int clientSocket) {
+void sendIndexFile(int clientSocket) {
     cout << "GET index file request" << endl;
     const char *path= "./www/index.html";
     ifstream indexFile;
@@ -44,23 +39,25 @@ void openIndexFile(int clientSocket) {
         send(clientSocket, buffer, strlen(buffer), 0);
         delete[] buffer;
 
-        closeClientSocket(clientSocket);
+        cout << "Closing client socket " << clientSocket << " now. " << endl;
+        close(clientSocket);
 
     }  else {
         cout << "Error opening index file." << endl;
-        closeClientSocket(clientSocket);
+        cout << "Closing client socket " << clientSocket << " now. " << endl;
+        close(clientSocket);
     }
 }
 
 void ignoreFavIcon(int clientSocket) {
     cout << "Ignoring favicon.ico request." << endl;
-    closeClientSocket(clientSocket);
+    close(clientSocket);
 }
 
 void displayNotFound(int clientSocket) {
     const char *buffer = "HTTP/1.1 400 OK\r\n\r\nNot Found";
     send(clientSocket, buffer, strlen(buffer), 0);
-    closeClientSocket(clientSocket);
+    close(clientSocket);
 }
 
 void process_clientBuffer(string clientBuffer, int clientSocket) {
@@ -71,8 +68,8 @@ void process_clientBuffer(string clientBuffer, int clientSocket) {
     int len = fileToExec.length();
 
     if (clientBuffer.empty()) {
-        cout << "Empty buffer" << endl;
-        closeClientSocket(clientSocket);
+        cout << "Empty client message" << endl;
+        close(clientSocket);
         return;
     }
 
@@ -84,10 +81,10 @@ void process_clientBuffer(string clientBuffer, int clientSocket) {
     }
 
     string reqPath = req.substr(5, req.length() - 6);
-    cout << "reqPath --------> " << reqPath << endl;
+    cout << "Client Requested Path --------> " << reqPath << endl;
  
-    if (clientBuffer[5] == ' ') {
-        openIndexFile(clientSocket);
+    if (clientBuffer[5] == ' ' || clientBuffer[5] == '/') {
+        sendIndexFile(clientSocket);
         return;
         
     } else if (reqPath.substr(0, 12) == fileToExec) {
@@ -112,7 +109,7 @@ void process_clientBuffer(string clientBuffer, int clientSocket) {
         pid_t pid = fork();// create child
         if (pid == -1) {
             cout << "Error creating child" << endl;
-            closeClientSocket(clientSocket);
+            close(clientSocket);
             return;
         } else if (pid == 0) {
             cout << "Child process created" << endl;
@@ -122,13 +119,10 @@ void process_clientBuffer(string clientBuffer, int clientSocket) {
             
             const char *path= "./cgi-bin/hello.alicgi"; // get path of executable
             const char* args[] = {path, nullptr};
+        
             execvp(path, const_cast<char* const*>(args)); // execute
-            while (read(pipefd[0], &cgiBuff, 1024) > 0) {
-                write(clientSocket, &cgiBuff, 1024);
-            }
-            write(clientSocket, "\n", 1);
+
             
-            closeClientSocket(clientSocket);
         } else {
             close(pipefd[1]);
             int status;
@@ -143,7 +137,6 @@ void process_clientBuffer(string clientBuffer, int clientSocket) {
             }
 
             close(pipefd[0]);
-
             waitpid(pid, &status, 0);
 
             if (WIFEXITED(status)) {
@@ -151,7 +144,7 @@ void process_clientBuffer(string clientBuffer, int clientSocket) {
             } else {
                 std::cerr << "Child process did not exit normally.\n" << WEXITSTATUS(status) << "\n";
             }
-            closeClientSocket(clientSocket);
+            close(clientSocket);
         }
     } else if (reqPath == "favicon.ico HTTP/1.1") {
         ignoreFavIcon(clientSocket);
@@ -200,11 +193,7 @@ int createSocket() {
 
 
 int main() {
-    int serverSocketFd = createSocket();
-    if (serverSocketFd == -1) {
-        cout << "Error creating socket. "  << strerror(errno) << endl;
-    }
-
+    // Set up socket properties
     struct addrinfo hints, *servinfo, *p;
     int rv;
 
@@ -212,35 +201,35 @@ int main() {
     hints.ai_family = AF_INET; // use AF_INET6 to force IPv6
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE; // use my IP address
+    
 
     if ((rv = getaddrinfo(NULL, "8080", &hints, &servinfo)) != 0) {
         cout << stderr << " getaddrinfo: " << gai_strerror(rv) << endl;
         return 1;
     }
 
-    // loop through all the results and bind to the first we can
-    for(p = servinfo; p != NULL; p = p->ai_next) {
-        if ((serverSocketFd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-            perror("socket");
-            continue;
-        }
-
-        if (::bind(serverSocketFd, p->ai_addr, p->ai_addrlen) == -1) {
-            cout << "Error binding to socket. " << strerror(errno) << endl;
-            close(serverSocketFd);
-            continue;
-        }
-
-        break; // if we get here, we must have connected successfully
+    // Create and bind socket
+    int serverSocketFd;
+    if ((serverSocketFd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol)) == -1) {
+        perror("socket");
+        //continue;
     }
 
-    if (p == NULL) {
-    // looped off the end of the list with no successful bind
+    // use "::" to access theglobal namespace bind
+    if (::bind(serverSocketFd, servinfo->ai_addr, servinfo->ai_addrlen) == -1) {
+        cout << "Error binding to socket. " << strerror(errno) << endl;
+        close(serverSocketFd);
+    }
+
+
+    if (servinfo == NULL) {
         fprintf(stderr, "failed to bind socket\n");
         return 1;
     }
 
     freeaddrinfo(servinfo); // all done with this structure
+
+    // Listen to socket
     
     if (listen(serverSocketFd, 5) == -1) {
         cout << "Error listening on socket " << strerror(errno) << endl;
@@ -251,13 +240,15 @@ int main() {
 
     while (true) {
         cout << "Waiting for connection..." << endl;
+
+        // Accept client
         int clientSocket = accept(serverSocketFd, nullptr, nullptr);
         if (clientSocket == -1) {
             cout << "Error accepting connection." << strerror(errno) << endl;
             return 1;
         }
 
-        cout << "Accepted connection with client socket..." << clientSocket << endl;
+        // Receive message from client
         char tempBuffer[1024] = {0};
         ssize_t bytesReceived = recv(clientSocket, tempBuffer, sizeof(tempBuffer), 0);
         if (bytesReceived == -1) {
@@ -268,7 +259,6 @@ int main() {
         // Create a string copy of the buffer for the thread
         string clientBuffer(tempBuffer, bytesReceived);
 
-        cout << "Creating thread with clientSocket value..." << clientSocket << endl;
         thread clientThread(process_clientBuffer, clientBuffer, clientSocket);
         clientThread.detach();     
     

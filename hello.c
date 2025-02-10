@@ -4,8 +4,8 @@
 #include <string.h>
 
 int main(void) {
-  printf("Hello world\n\n");
-  printf("This is the response from the web werver.\n\n");
+  printf("Hello world! ");
+  printf("This is the response from the web werver: ");
 
   char* data = getenv("QUERY_STRING");
 
