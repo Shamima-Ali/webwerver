@@ -1,2 +1,4 @@
 # webwerver
-How do webservers serve webs? Idk. Watch me find out in C++
+To run:
+clang++ -std=c++20  server.cpp -o server
+./server
